@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IPO & Liquidity Tracker</title>
+  
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            slate: {
+              850: '#151e2e',
+              900: '#0f172a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom Scrollbar for Matrix */
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 8px;
+      width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen font-sans antialiased selection:bg-emerald-500/30">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // --- Icons ---
+    const IconPlus = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>;
+    const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>;
+    const IconX = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>;
+    const IconWallet = () => <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" /></svg>;
+
+    // --- Helpers ---
+    const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
+
+    // Default data structure
+    const DEFAULT_ACCOUNTS = [
+      { id: 'acc1', name: 'Self' },
+      { id: 'acc2', name: 'Mom' },
+      { id: 'acc3', name: 'Dad' },
+      { id: 'acc4', name: 'Spouse' },
+      { id: 'acc5', name: 'Other' },
+    ];
+
+    const STATUS_MAP = {
+      NONE: { label: 'Not Applied', color: 'bg-slate-800 text-slate-500 hover:bg-slate-700' },
+      APPLIED: { label: 'Applied', color: 'bg-amber-500/20 text-amber-400 border border-amber-500/30' },
+      NOT_ALLOTTED: { label: 'Not Allotted', color: 'bg-red-500/10 text-red-400 border border-red-500/20' },
+      ALLOTTED: { label: 'Allotted', color: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' },
+      SOLD: { label: 'Sold (Settling)', color: 'bg-blue-500/20 text-blue-400 border border-blue-500/30' },
+      SETTLED: { label: 'Settled', color: 'bg-purple-500/20 text-purple-400 border border-purple-500/30' }
+    };
+
+    function App() {
+      // --- State Management ---
+      const [initialCapital, setInitialCapital] = useState(1000000);
+      const [accounts, setAccounts] = useState(DEFAULT_ACCOUNTS);
+      const [ipos, setIpos] = useState([]);
+      const [applications, setApplications] = useState({});
+
+      // Modals
+      const [isIpoModalOpen, setIsIpoModalOpen] = useState(false);
+      const [activeCell, setActiveCell] = useState(null); // { ipoId, accId }
+
+      // --- Initialization / LocalStorage ---
+      useEffect(() => {
+        const savedData = localStorage.getItem('ipoTrackerData');
+        if (savedData) {
+          try {
+            const parsed = JSON.parse(savedData);
+            if (parsed.initialCapital) setInitialCapital(parsed.initialCapital);
+            if (parsed.accounts) setAccounts(parsed.accounts);
+            if (parsed.ipos) setIpos(parsed.ipos);
+            if (parsed.applications) setApplications(parsed.applications);
+          } catch (e) {
+            console.error("Failed to parse local storage data.");
+          }
+        }
+      }, []);
+
+      useEffect(() => {
+        localStorage.setItem('ipoTrackerData', JSON.stringify({
+          initialCapital,
+          accounts,
+          ipos,
+          applications
+        }));
+      }, [initialCapital, accounts, ipos, applications]);
+
+      // --- Core Financial Calculations ---
+      const metrics = useMemo(() => {
+        let blocked = 0;
+        let allottedValue = 0;
+        let settlingValue = 0;
+        let realizedProfit = 0;
+        let activeInvestment = 0; // Cash tied up in APPLIED, ALLOTTED, or SOLD statuses
+
+        // Iterate over all tracked applications
+        Object.entries(applications).forEach(([key, app]) => {
+          const [ipoId] = key.split('_');
+          const ipo = ipos.find(i => i.id === ipoId);
+          if (!ipo) return;
+
+          if (app.status === 'APPLIED') {
+            blocked += ipo.lotCost;
+            activeInvestment += ipo.lotCost;
+          } else if (app.status === 'ALLOTTED') {
+            allottedValue += ipo.lotCost;
+            activeInvestment += ipo.lotCost;
+          } else if (app.status === 'SOLD') {
+            settlingValue += (app.sellAmount || 0);
+            activeInvestment += ipo.lotCost;
+          } else if (app.status === 'SETTLED') {
+            realizedProfit += ((app.sellAmount || 0) - ipo.lotCost);
+          }
+        });
+
+        const availableCash = initialCapital + realizedProfit - activeInvestment;
+        const totalNetWorth = availableCash + blocked + allottedValue + settlingValue;
+
+        return { blocked, allottedValue, settlingValue, realizedProfit, availableCash, totalNetWorth };
+      }, [ipos, applications, initialCapital]);
+
+      // --- Handlers ---
+      const handleAddIpo = (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const newIpo = {
+          id: 'ipo_' + Date.now(),
+          name: formData.get('name'),
+          lotSize: Number(formData.get('lotSize')),
+          price: Number(formData.get('price')),
+          lotCost: Number(formData.get('lotSize')) * Number(formData.get('price'))
+        };
+        setIpos([...ipos, newIpo]);
+        setIsIpoModalOpen(false);
+      };
+
+      const handleDeleteIpo = (id) => {
+        if(confirm("Are you sure you want to delete this IPO? All associated applications will be removed.")) {
+          setIpos(ipos.filter(i => i.id !== id));
+          const newApps = { ...applications };
+          Object.keys(newApps).forEach(key => {
+            if(key.startsWith(id + '_')) delete newApps[key];
+          });
+          setApplications(newApps);
+        }
+      };
+
+      const handleUpdateCell = (status, sellAmount = 0) => {
+        if (!activeCell) return;
+        const key = `${activeCell.ipoId}_${activeCell.accId}`;
+        
+        const newApps = { ...applications };
+        if (status === 'NONE') {
+          delete newApps[key]; // Clean up state
+        } else {
+          newApps[key] = { status, sellAmount: Number(sellAmount) };
+        }
+        
+        setApplications(newApps);
+        setActiveCell(null);
+      };
+
+      // --- Components ---
+      const MetricCard = ({ title, value, colorClass, subtitle }) => (
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 backdrop-blur-sm flex flex-col">
+          <p className="text-slate-400 text-sm font-medium mb-1">{title}</p>
+          <p className={`text-3xl font-bold tracking-tight ${colorClass}`}>{formatCurrency(value)}</p>
+          {subtitle && <p className="text-slate-500 text-xs mt-2">{subtitle}</p>}
+        </div>
+      );
+
+      const CellActionModal = () => {
+        if (!activeCell) return null;
+        const ipo = ipos.find(i => i.id === activeCell.ipoId);
+        const acc = accounts.find(a => a.id === activeCell.accId);
+        const key = `${activeCell.ipoId}_${activeCell.accId}`;
+        const currentApp = applications[key] || { status: 'NONE' };
+        
+        const [selectedStatus, setSelectedStatus] = useState(currentApp.status);
+        const [sellAmount, setSellAmount] = useState(currentApp.sellAmount || '');
+
+        const onSubmit = (e) => {
+          e.preventDefault();
+          handleUpdateCell(selectedStatus, sellAmount);
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+              <div className="flex justify-between items-center p-4 border-b border-slate-700/50 bg-slate-850">
+                <h3 className="text-lg font-semibold text-white">Update Application Status</h3>
+                <button onClick={() => setActiveCell(null)} className="text-slate-400 hover:text-white transition-colors"><IconX /></button>
+              </div>
+              <form onSubmit={onSubmit} className="p-5">
+                <div className="mb-6">
+                  <p className="text-sm text-slate-400">IPO: <span className="text-white font-medium">{ipo.name}</span></p>
+                  <p className="text-sm text-slate-400">Account: <span className="text-white font-medium">{acc.name}</span></p>
+                  <p className="text-sm text-slate-400">Lot Cost: <span className="text-amber-400 font-medium">{formatCurrency(ipo.lotCost)}</span></p>
+                </div>
+
+                <div className="space-y-2 mb-6">
+                  {Object.entries(STATUS_MAP).map(([statusKey, info]) => (
+                    <label key={statusKey} className={`flex items-center p-3 rounded-lg border cursor-pointer transition-all ${selectedStatus === statusKey ? 'bg-slate-700 border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 hover:bg-slate-750'}`}>
+                      <input type="radio" name="status" value={statusKey} checked={selectedStatus === statusKey} onChange={() => setSelectedStatus(statusKey)} className="hidden" />
+                      <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${selectedStatus === statusKey ? 'border-indigo-400' : 'border-slate-500'}`}>
+                        {selectedStatus === statusKey && <div className="w-2 h-2 bg-indigo-400 rounded-full"></div>}
+                      </div>
+                      <span className="text-slate-200 font-medium">{info.label}</span>
+                    </label>
+                  ))}
+                </div>
+
+                {(selectedStatus === 'SOLD' || selectedStatus === 'SETTLED') && (
+                  <div className="mb-6 p-4 bg-slate-900 rounded-lg border border-slate-700">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Total Sale Amount (₹)</label>
+                    <input type="number" required value={sellAmount} onChange={(e) => setSellAmount(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g., 20000" />
+                    {sellAmount && (
+                      <p className={`text-xs mt-2 ${Number(sellAmount) > ipo.lotCost ? 'text-emerald-400' : 'text-red-400'}`}>
+                        Estimated Profit: {formatCurrency(Number(sellAmount) - ipo.lotCost)}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-700/50">
+                  <button type="button" onClick={() => setActiveCell(null)} className="px-5 py-2.5 text-sm font-medium text-slate-300 hover:text-white">Cancel</button>
+                  <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">Save Status</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+          {/* Header & Global Controls */}
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+            <div>
+              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                <IconWallet /> IPO Liquidity Dashboard
+              </h1>
+              <p className="text-slate-400 text-sm mt-1">Manage allocations, track blocked funds, and monitor T+1 settlement.</p>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-800/50 p-2 rounded-xl border border-slate-700/50 backdrop-blur-sm">
+              <div className="flex items-center px-3">
+                <label className="text-sm text-slate-400 mr-3 whitespace-nowrap">Base Capital (₹)</label>
+                <input 
+                  type="number" 
+                  value={initialCapital}
+                  onChange={(e) => setInitialCapital(Number(e.target.value))}
+                  className="bg-slate-900 border border-slate-600 rounded-md px-3 py-1.5 text-white w-32 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              </div>
+              <div className="w-px h-8 bg-slate-700 hidden sm:block"></div>
+              <button onClick={() => setIsIpoModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors w-full sm:w-auto justify-center">
+                <IconPlus /> Add IPO
+              </button>
+            </div>
+          </header>
+
+          {/* Summary Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <MetricCard title="Total Net Worth" value={metrics.totalNetWorth} colorClass="text-white" subtitle="Cash + Blocked + Allotted + Settling" />
+            <MetricCard title="Available Cash" value={metrics.availableCash} colorClass="text-emerald-400" subtitle="Ready for next bid" />
+            <MetricCard title="Blocked Funds" value={metrics.blocked} colorClass="text-amber-400" subtitle="UPI / ASBA locked" />
+            <MetricCard title="Allotted / Settling" value={metrics.allottedValue + metrics.settlingValue} colorClass="text-blue-400" subtitle="Holdings + T+1 Pipeline" />
+            <MetricCard title="Realized P&L" value={metrics.realizedProfit} colorClass={metrics.realizedProfit >= 0 ? 'text-emerald-400' : 'text-red-400'} subtitle="From Settled IPOs only" />
+          </div>
+
+          {/* Main Matrix Table */}
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden backdrop-blur-sm shadow-xl">
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-850/80 border-b border-slate-700/50">
+                    <th className="p-4 font-semibold text-slate-300 text-sm whitespace-nowrap sticky left-0 bg-slate-850 z-10 border-r border-slate-700/50">IPO Details</th>
+                    {accounts.map(acc => (
+                      <th key={acc.id} className="p-4 font-semibold text-slate-300 text-sm text-center border-r border-slate-700/50 min-w-[140px]">{acc.name}</th>
+                    ))}
+                    <th className="p-4 font-semibold text-slate-300 text-sm text-right whitespace-nowrap">Total Blocked</th>
+                    <th className="p-4"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700/50">
+                  {ipos.length === 0 ? (
+                    <tr>
+                      <td colSpan={accounts.length + 3} className="p-8 text-center text-slate-500">
+                        No active IPOs tracked. Click "Add IPO" to begin.
+                      </td>
+                    </tr>
+                  ) : ipos.map(ipo => {
+                    // Calculate Total Blocked per row
+                    let rowBlocked = 0;
+                    accounts.forEach(acc => {
+                      const app = applications[`${ipo.id}_${acc.id}`];
+                      if (app?.status === 'APPLIED') rowBlocked += ipo.lotCost;
+                    });
+
+                    return (
+                      <tr key={ipo.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="p-4 sticky left-0 bg-slate-900/40 backdrop-blur-md z-10 border-r border-slate-700/50">
+                          <p className="font-semibold text-white whitespace-nowrap">{ipo.name}</p>
+                          <p className="text-xs text-slate-400 mt-1">Lot: {ipo.lotSize} @ ₹{ipo.price}</p>
+                          <p className="text-xs font-medium text-slate-300 mt-0.5">Cost: {formatCurrency(ipo.lotCost)}</p>
+                        </td>
+                        
+                        {accounts.map(acc => {
+                          const key = `${ipo.id}_${acc.id}`;
+                          const status = applications[key]?.status || 'NONE';
+                          const statusData = STATUS_MAP[status];
+                          const sellAmt = applications[key]?.sellAmount;
+
+                          return (
+                            <td key={acc.id} className="p-3 border-r border-slate-700/50 text-center">
+                              <button 
+                                onClick={() => setActiveCell({ ipoId: ipo.id, accId: acc.id })}
+                                className={`w-full py-2 px-3 rounded-md text-xs font-semibold tracking-wide transition-all duration-200 ${statusData.color}`}
+                              >
+                                {statusData.label}
+                                {(status === 'SOLD' || status === 'SETTLED') && sellAmt && (
+                                  <span className="block mt-1 font-normal opacity-80 text-[10px]">
+                                    Net: {formatCurrency(sellAmt - ipo.lotCost)}
+                                  </span>
+                                )}
+                              </button>
+                            </td>
+                          );
+                        })}
+                        
+                        <td className="p-4 text-right font-medium text-amber-400 whitespace-nowrap">
+                          {rowBlocked > 0 ? formatCurrency(rowBlocked) : '-'}
+                        </td>
+                        <td className="p-4 text-center">
+                          <button onClick={() => handleDeleteIpo(ipo.id)} className="text-slate-500 hover:text-red-400 transition-colors" title="Delete IPO">
+                            <IconTrash />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Add IPO Modal */}
+          {isIpoModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+                <div className="flex justify-between items-center p-4 border-b border-slate-700/50 bg-slate-850">
+                  <h3 className="text-lg font-semibold text-white">Track New IPO</h3>
+                  <button onClick={() => setIsIpoModalOpen(false)} className="text-slate-400 hover:text-white transition-colors"><IconX /></button>
+                </div>
+                <form onSubmit={handleAddIpo} className="p-5 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Company Name</label>
+                    <input name="name" type="text" required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Tata Technologies" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Lot Size (Shares)</label>
+                      <input name="lotSize" type="number" required min="1" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. 30" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Price per Share (₹)</label>
+                      <input name="price" type="number" required min="1" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. 500" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-4 mt-2">
+                    <button type="button" onClick={() => setIsIpoModalOpen(false)} className="px-5 py-2.5 text-sm font-medium text-slate-300 hover:text-white">Cancel</button>
+                    <button type="submit" className="px-5 py-2.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">Add IPO</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Cell Action Modal */}
+          <CellActionModal />
+          
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
